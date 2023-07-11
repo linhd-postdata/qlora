@@ -517,7 +517,7 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         elif dataset_name == 'alpaca-clean':
             return load_dataset("yahma/alpaca-cleaned")
         elif dataset_name == 'oscar-es':
-            return load_dataset("oscar-corpus/OSCAR-2301", streaming=True, language="es", split="train")
+            return load_dataset("oscar-corpus/OSCAR-2301", streaming=True, language="es")
         elif dataset_name == 'chip2':
             return load_dataset("laion/OIG", data_files='unified_chip2.jsonl')
         elif dataset_name == 'self-instruct':
