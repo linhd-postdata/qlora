@@ -28,7 +28,7 @@ from transformers import (
     LlamaTokenizer
 
 )
-from datasets import load_dataset, Dataset
+from datasets import load_dataset, Dataset, IterableDatasetDict
 import evaluate
 
 from peft import (
@@ -40,6 +40,12 @@ from peft import (
 from peft.tuners.lora import LoraLayer
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
+OSCAR_BASE_URL = "https://huggingface.co/datasets/oscar-corpus/OSCAR-2301/resolve/main/es_meta"
+OSCAR_DATA_FILES = {
+        'train': [f"{OSCAR_BASE_URL}/es_meta_part_{x}.jsonl.zst" for x in range(1,292)],
+        'eval': [f"{OSCAR_BASE_URL}/es_meta_part_292.jsonl.zst"]
+}
+AUTH_TOKEN = os.getenv("HF_TOKEN", default=None)
 
 torch.backends.cuda.matmul.allow_tf32 = True
 
@@ -92,6 +98,10 @@ class DataArguments:
     dataset: str = field(
         default='alpaca',
         metadata={"help": "Which dataset to finetune on. See datamodule for options."}
+    )
+    dataset_language: str = field(
+        default='es',
+        metadata={"help": "Which language of the dataset is going to be used."}
     )
     dataset_format: Optional[str] = field(
         default=None,
@@ -157,7 +167,7 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     )
     lora_dropout: float = field(
         default=0.0,
-        metadata={"help":"Lora dropout."}
+        metadata={"help": "Lora dropout."}
     )
     max_memory_MB: int = field(
         default=80000,
@@ -498,13 +508,30 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         - vicuna
 
     """
-    def load_data(dataset_name):
+    def load_data(dataset_name, lang):
         if dataset_name == 'alpaca':
             return load_dataset("tatsu-lab/alpaca")
         elif dataset_name == 'alpaca-clean':
             return load_dataset("yahma/alpaca-cleaned")
-        elif dataset_name == 'oscar-es':
-            return load_dataset("oscar-corpus/OSCAR-2301", streaming=True, language="es")
+        elif dataset_name == f'oscar':
+
+            oscar_train = load_dataset(
+                "oscar-corpus/OSCAR-2301",
+                data_files=OSCAR_DATA_FILES['train'],
+                streaming=True,
+                language=lang,
+                use_auth_token=AUTH_TOKEN,
+            )
+            oscar_eval = load_dataset(
+                "oscar-corpus/OSCAR-2301",
+                data_files=OSCAR_DATA_FILES['eval'],
+                streaming=True,
+                language=lang,
+                use_auth_token=AUTH_TOKEN,
+            )
+            return IterableDatasetDict(
+                {"train": oscar_train["train"], "eval": oscar_eval["train"]}
+            )
         elif dataset_name == 'chip2':
             return load_dataset("laion/OIG", data_files='unified_chip2.jsonl')
         elif dataset_name == 'self-instruct':
@@ -552,7 +579,7 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
                 'input': '',
                 'output': x['text'],
             })
-        elif dataset_format == 'no_instructions' or (dataset_format is None and args.dataset == 'oscar-es'):
+        elif dataset_format == 'no_instructions' or (dataset_format is None and args.dataset == 'oscar'):
             return dataset
         elif dataset_format == 'input-output':
             # leave as is
@@ -564,7 +591,7 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         return dataset
 
      # Load dataset.
-    dataset = load_data(args.dataset)
+    dataset = load_data(args.dataset, args.dataset_language)
     dataset = format_dataset(dataset, args.dataset_format)
 
     # Split train/eval, reduce size
