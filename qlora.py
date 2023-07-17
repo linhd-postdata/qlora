@@ -392,8 +392,16 @@ class DataCollatorForCausalLM(object):
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         # Extract elements
-        sources = [f"{self.tokenizer.bos_token}{example['input']}" for example in instances]
-        targets = [f"{example['output']}{self.tokenizer.eos_token}" for example in instances]
+        if True:
+            sources = [f"{self.tokenizer.bos_token}{example['text']}" for
+                       example in instances]
+            targets = [f"{self.tokenizer.eos_token}" for
+                       example in instances]
+        else:
+            sources = [f"{self.tokenizer.bos_token}{example['input']}" for
+                       example in instances]
+            targets = [f"{example['output']}{self.tokenizer.eos_token}" for
+                       example in instances]
         # Tokenize
         tokenized_sources_with_prompt = self.tokenizer(
             sources,
@@ -565,6 +573,8 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
                 'input': '',
                 'output': x['text'],
             })
+        elif dataset_format == 'no_instructions' or (dataset_format is None and args.dataset == 'oscar-es'):
+            return dataset
         elif dataset_format == 'input-output':
             # leave as is
             pass
@@ -612,6 +622,7 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         predict_dataset=eval_dataset if args.do_predict else None,
         data_collator=data_collator
     )
+
 
 def get_last_checkpoint(checkpoint_dir):
     if isdir(checkpoint_dir):
