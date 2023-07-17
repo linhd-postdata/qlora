@@ -173,7 +173,7 @@ class TrainingArguments(transformers.Seq2SeqTrainingArguments):
     gradient_accumulation_steps: int = field(default=16, metadata={"help": 'How many gradients to accumulate before to perform an optimizer step'})
     max_steps: int = field(default=10000, metadata={"help": 'How many optimizer update steps to take'})
     weight_decay: float = field(default=0.0, metadata={"help": 'The L2 weight decay rate of AdamW'}) # use lora dropout instead for regularization if needed
-    learning_rate: float = field(default=0.0002, metadata={"help": 'The learnign rate'})
+    learning_rate: float = field(default=0.0002, metadata={"help": 'The learning rate'})
     remove_unused_columns: bool = field(default=False, metadata={"help": 'Removed unused columns. Needed to make this codebase work.'})
     max_grad_norm: float = field(default=0.3, metadata={"help": 'Gradient clipping max norm. This is tuned and works well for all models tested.'})
     gradient_checkpointing: bool = field(default=True, metadata={"help": 'Use gradient checkpointing. You want to use this.'})
@@ -295,7 +295,7 @@ def get_accelerate_model(args, checkpoint_dir):
         ),
         torch_dtype=(torch.float32 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32)),
         trust_remote_code=args.trust_remote_code,
-        use_auth_token=args.use_auth_token
+        use_auth_token=args.use_auth_token,
     )
     if compute_dtype == torch.float16 and args.bits == 4:
         major, minor = torch.cuda.get_device_capability()
@@ -343,6 +343,7 @@ def get_accelerate_model(args, checkpoint_dir):
                     module = module.to(torch.bfloat16)
     return model
 
+
 def print_trainable_parameters(args, model):
     """
     Prints the number of trainable parameters in the model.
@@ -359,6 +360,7 @@ def print_trainable_parameters(args, model):
         f"all params: {all_param} || "
         f"trainable: {100 * trainable_params / all_param}"
     )
+
 
 def smart_tokenizer_and_embedding_resize(
     special_tokens_dict: Dict,
@@ -392,16 +394,8 @@ class DataCollatorForCausalLM(object):
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         # Extract elements
-        if True:
-            sources = [f"{self.tokenizer.bos_token}{example['text']}" for
-                       example in instances]
-            targets = [f"{self.tokenizer.eos_token}" for
-                       example in instances]
-        else:
-            sources = [f"{self.tokenizer.bos_token}{example['input']}" for
-                       example in instances]
-            targets = [f"{example['output']}{self.tokenizer.eos_token}" for
-                       example in instances]
+        sources = [f"{self.tokenizer.bos_token}{example['text']}{self.tokenizer.eos_token}" for
+                   example in instances]
         # Tokenize
         tokenized_sources_with_prompt = self.tokenizer(
             sources,
@@ -409,39 +403,24 @@ class DataCollatorForCausalLM(object):
             truncation=True,
             add_special_tokens=False,
         )
-        tokenized_targets = self.tokenizer(
-            targets,
-            max_length=self.target_max_len,
-            truncation=True,
-            add_special_tokens=False,
-        )
         # Build the input and labels for causal LM
         input_ids = []
         labels = []
-        for tokenized_source, tokenized_target in zip(
-            tokenized_sources_with_prompt['input_ids'],
-            tokenized_targets['input_ids']
-        ):
-            if not self.predict_with_generate:
-                input_ids.append(torch.tensor(tokenized_source + tokenized_target))
-                if not self.train_on_source:
-                    labels.append(
-                        torch.tensor([IGNORE_INDEX for _ in range(len(tokenized_source))] + copy.deepcopy(tokenized_target))
-                    )
-                else:
-                    labels.append(torch.tensor(copy.deepcopy(tokenized_source + tokenized_target)))
-            else:
-                input_ids.append(torch.tensor(tokenized_source))
+        for tokenized_source in tokenized_sources_with_prompt['input_ids']:
+            input_ids.append(torch.tensor(tokenized_source))
+            labels.append(torch.tensor(copy.deepcopy(tokenized_source)))
+
         # Apply padding
         input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
         labels = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX) if not self.predict_with_generate else None
         data_dict = {
             'input_ids': input_ids,
-            'attention_mask':input_ids.ne(self.tokenizer.pad_token_id),
+            'attention_mask': input_ids.ne(self.tokenizer.pad_token_id),
         }
         if labels is not None:
             data_dict['labels'] = labels
         return data_dict
+
 
 def extract_unnatural_instructions_data(examples, extract_reformulations=False):
     out = {
@@ -667,7 +646,7 @@ def train():
         padding_side="right",
         use_fast=False, # Fast tokenizer giving issues.
         tokenizer_type='llama' if 'llama' in args.model_name_or_path else None, # Needed for HF name change
-        use_auth_token=args.use_auth_token,
+        #use_auth_token=args.use_auth_token,
     )
     if tokenizer._pad_token is None:
         smart_tokenizer_and_embedding_resize(
